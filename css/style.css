@@ -12,3 +12,5 @@ h1 { font-size: 1.6rem; margin: 0 0 16px; }
 .detail p { margin: 4px 0; }
 .btn { display:block; width:100%; min-height:52px; margin-top:16px; font-size:1.1rem; font-weight:600; border:0; border-radius:12px; background:var(--accent); color:#fff; }
 .btn:active { opacity:.85; }
+/* ให้แอตทริบิวต์ hidden ซ่อนองค์ประกอบได้จริง (ไม่ถูก display ของคลาสอื่นทับ) */
+[hidden] { display: none !important; }
