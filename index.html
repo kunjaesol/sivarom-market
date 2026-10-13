@@ -1,158 +1,24 @@
-// ============================================================
-// Sivarom Market — Edge Function: liff-auth
-//
-// หน้าที่: รับ ID token จาก LIFF → ตรวจกับ LINE → สร้าง/ค้นหาผู้ใช้ → ออก "ตั๋วเข้าสู่ระบบ" (token_hash)
-// ให้หน้าเว็บนำไปแลกเป็นเซสชันของ Supabase ด้วย supabase.auth.verifyOtp(...)
-//
-// ต้องตั้งค่า:
-//   Secrets (Edge Functions > Secrets):
-//     LINE_CHANNEL_ID  = Channel ID ของช่อง LINE Login (ตัวเลข ไม่ใช่ความลับ)
-//     ALLOWED_ORIGIN   = https://kunjaesol.github.io  (โดเมนหน้าเว็บ ไม่มี / ท้าย)
-//   Function settings: ปิด "Verify JWT" (ผู้ใช้ยังไม่มี JWT ตอนล็อกอิน; ฟังก์ชันนี้ตรวจ token ของ LINE เอง)
-//
-// คีย์ลับ (secret key / service role) อ่านจาก environment ของ Supabase เท่านั้น ไม่อยู่ในโค้ด
-// ============================================================
-import { createClient } from "npm:@supabase/supabase-js@2";
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Sivarom Market</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="app" aria-live="polite">
+    <h1>Sivarom Market</h1>
+    <p id="status" class="status">กำลังเตรียมระบบ...</p>
+    <div id="detail" class="detail" hidden></div>
+    <button id="retry" class="btn" hidden>ลองใหม่</button>
+  </main>
 
-const LINE_VERIFY_URL = "https://api.line.me/oauth2/v2.1/verify";
-const LINE_CHANNEL_ID = Deno.env.get("LINE_CHANNEL_ID") ?? "";
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "";
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-
-// คีย์ลับฝั่งเซิร์ฟเวอร์: ใช้แบบใหม่ก่อน (SUPABASE_SECRET_KEYS) ถ้าไม่มีใช้แบบเดิม
-function serverKey(): string {
-  const multi = Deno.env.get("SUPABASE_SECRET_KEYS");
-  if (multi) {
-    try {
-      const keys = JSON.parse(multi);
-      if (keys && typeof keys.default === "string") return keys.default;
-    } catch (_) { /* ใช้แบบเดิมต่อ */ }
-  }
-  return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-}
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": ALLOWED_ORIGIN || "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Vary": "Origin",
-};
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
-}
-
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-
-  if (!LINE_CHANNEL_ID || !SUPABASE_URL || !serverKey()) {
-    console.error("liff-auth: missing configuration");
-    return json({ error: "server_not_configured" }, 500);
-  }
-
-  // ---------- 1) อ่าน ID token จากคำขอ ----------
-  let idToken: unknown;
-  try {
-    ({ idToken } = await req.json());
-  } catch (_) {
-    return json({ error: "bad_request" }, 400);
-  }
-  if (typeof idToken !== "string" || idToken.length < 20 || idToken.length > 4096) {
-    return json({ error: "bad_request" }, 400);
-  }
-
-  // ---------- 2) ตรวจ token กับ LINE (ตรวจลายเซ็น วันหมดอายุ และ Channel ID) ----------
-  let claims: Record<string, unknown>;
-  try {
-    const res = await fetch(LINE_VERIFY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ id_token: idToken, client_id: LINE_CHANNEL_ID }),
-    });
-    if (!res.ok) return json({ error: "invalid_token" }, 401);
-    claims = await res.json();
-  } catch (e) {
-    console.error("liff-auth: LINE verify failed", e);
-    return json({ error: "line_unreachable" }, 502);
-  }
-  const sub = claims.sub;
-  if (typeof sub !== "string" || sub.length === 0 || String(claims.aud) !== LINE_CHANNEL_ID) {
-    return json({ error: "invalid_token" }, 401);
-  }
-  const lineName = typeof claims.name === "string" && claims.name.trim()
-    ? claims.name.trim().slice(0, 100)
-    : null;
-
-  // ---------- 3) หา/สร้างผู้ใช้ ----------
-  const admin = createClient(SUPABASE_URL, serverKey(), {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const email = `line-${sub.toLowerCase()}@users.sivarom.invalid`; // อีเมลสมมติ ไม่มีการส่งอีเมลจริง
-
-  let isNew = false;
-  const found = await admin.from("users").select("id, status").eq("line_user_id", sub).maybeSingle();
-  if (found.error) {
-    console.error("liff-auth: lookup failed", found.error);
-    return json({ error: "server_error" }, 500);
-  }
-  let existing = found.data;
-
-  if (!existing) {
-    const comm = await admin.from("communities").select("id").order("created_at").limit(1).maybeSingle();
-    if (comm.error || !comm.data) {
-      console.error("liff-auth: community missing", comm.error);
-      return json({ error: "server_error" }, 500);
-    }
-
-    const created = await admin.auth.admin.createUser({
-      email,
-      email_confirm: true,
-      user_metadata: { line_user_id: sub },
-    });
-    if (created.error || !created.data?.user) {
-      // กรณีสองคำขอแรกเข้าพร้อมกัน: ลองค้นหาอีกครั้ง
-      const again = await admin.from("users").select("id, status").eq("line_user_id", sub).maybeSingle();
-      if (again.data) {
-        existing = again.data;
-      } else {
-        console.error("liff-auth: createUser failed", created.error);
-        return json({ error: "server_error" }, 500);
-      }
-    } else {
-      const ins = await admin.from("users").insert({
-        id: created.data.user.id,
-        community_id: comm.data.id,
-        line_user_id: sub,
-        display_name: lineName,
-      });
-      if (ins.error) {
-        console.error("liff-auth: insert user failed", ins.error);
-        await admin.auth.admin.deleteUser(created.data.user.id); // ไม่ทิ้งบัญชีค้าง
-        return json({ error: "server_error" }, 500);
-      }
-      isNew = true;
-    }
-  }
-
-  if (existing && existing.status !== "active") {
-    return json({ error: "suspended" }, 403);
-  }
-
-  // ---------- 4) ออกตั๋วเข้าสู่ระบบ (ไม่ส่งอีเมล) ----------
-  const link = await admin.auth.admin.generateLink({ type: "magiclink", email });
-  const hashed = link.data?.properties?.hashed_token;
-  if (link.error || !hashed) {
-    console.error("liff-auth: generateLink failed", link.error);
-    return json({ error: "server_error" }, 500);
-  }
-
-  return json({
-    token_hash: hashed,
-    verification_type: link.data?.properties?.verification_type ?? "magiclink",
-    is_new: isNew,
-  });
-});
+  <!-- ไลบรารีภายนอก: LIFF (ทางการของ LINE) และ Supabase (ระบุเวอร์ชันตายตัว) -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
