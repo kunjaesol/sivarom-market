@@ -57,6 +57,12 @@
     return out.data.session;
   }
 
+  function fetchProfile(session) {
+    return sb.from("users")
+      .select("display_name, house_no, is_admin, consented_at")
+      .eq("id", session.user.id).maybeSingle();
+  }
+
   async function main() {
     retryEl.hidden = true;
     detailEl.hidden = true;
@@ -70,18 +76,33 @@
         liff.login(); return;
       }
 
-      // มีเซสชันเดิมอยู่แล้วหรือไม่ และเป็นของบัญชี LINE คนเดียวกับที่เปิดอยู่หรือไม่
+      // มีเซสชันเดิมอยู่แล้วหรือไม่ เป็นของบัญชี LINE คนเดียวกับที่เปิดอยู่หรือไม่ และบัญชีนั้นยังมีอยู่จริงหรือไม่
       var session = (await sb.auth.getSession()).data.session;
-      var sameUser = session && session.user && session.user.user_metadata &&
-                     session.user.user_metadata.line_user_id === decoded.sub;
-      if (session && !sameUser) { await sb.auth.signOut(); session = null; }
-      if (!session) { session = await loginWithLine(idToken); }
+      if (session) {
+        var sameUser = session.user && session.user.user_metadata &&
+                       session.user.user_metadata.line_user_id === decoded.sub;
+        if (!sameUser) {
+          await sb.auth.signOut(); session = null;
+        } else {
+          var chk = await sb.auth.getUser(); // ถามเซิร์ฟเวอร์ ไม่เชื่อแค่ข้อมูลที่เก็บไว้ในเครื่อง
+          if (chk.error || !chk.data || !chk.data.user) { await sb.auth.signOut(); session = null; }
+        }
+      }
+      var fresh = false;
+      if (!session) { session = await loginWithLine(idToken); fresh = true; }
 
       // อ่านโปรไฟล์ตัวเอง (ผ่านกฎ RLS) เพื่อยืนยันว่าสิทธิ์ใช้งานได้จริง
-      var prof = await sb.from("users")
-        .select("display_name, house_no, is_admin, consented_at")
-        .eq("id", session.user.id).single();
-      if (prof.error) { throw { friendly: "อ่านข้อมูลผู้ใช้ไม่สำเร็จ", tech: "profile " + prof.error.message }; }
+      var prof = await fetchProfile(session);
+      if ((prof.error || !prof.data) && !fresh) {
+        // เซสชันเก่าใช้ไม่ได้ (เช่น ข้อมูลผู้ใช้ถูกลบไปแล้ว) -> ล็อกอินใหม่ให้หนึ่งครั้ง
+        await sb.auth.signOut();
+        session = await loginWithLine(idToken);
+        fresh = true;
+        prof = await fetchProfile(session);
+      }
+      if (prof.error || !prof.data) {
+        throw { friendly: "อ่านข้อมูลผู้ใช้ไม่สำเร็จ", tech: "profile " + (prof.error ? prof.error.message : "not found") };
+      }
       var comm = await sb.rpc("current_community");
 
       var name = prof.data.display_name || "ลูกค้า";
