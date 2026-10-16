@@ -1,125 +1,31 @@
-// Sivarom Market — ขั้น 3: ล็อกอินด้วย LINE (LIFF) แล้วแสดง "สวัสดี [ชื่อ]"
-// ลำดับ: LIFF ล็อกอิน -> (ถ้ายังไม่มีเซสชัน) ส่ง ID token ให้ฟังก์ชัน liff-auth -> แลกตั๋วเป็นเซสชัน Supabase
-(function () {
-  "use strict";
-  var cfg = window.SIVAROM_CONFIG;
-  var statusEl = document.getElementById("status");
-  var detailEl = document.getElementById("detail");
-  var retryEl = document.getElementById("retry");
+// ลำดับการทำงานของแอป: ล็อกอิน -> (ครั้งแรก) ขอความยินยอม+บ้านเลขที่ -> Home
+import { h, mount } from "./ui.js";
+import { renderConsent } from "./screens/consent.js";
+import { renderHome } from "./screens/home.js";
 
-  var sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
-  });
+function renderError(root, e, retry) {
+  const friendly = e && e.friendly ? e.friendly : "เกิดข้อผิดพลาด กรุณาลองใหม่";
+  const tech = e && e.tech ? e.tech : String(e && e.message ? e.message : e);
+  mount(root,
+    h("h1", null, "Sivarom Market"),
+    h("p", { class: "status error" }, friendly),
+    h("div", { class: "detail" }, h("p", null, "รายละเอียดสำหรับผู้ดูแลระบบ: " + tech)),
+    h("button", { class: "btn", type: "button", onclick: retry }, "ลองใหม่"));
+}
 
-  function setStatus(text, kind) {
-    statusEl.textContent = text;
-    statusEl.className = "status" + (kind ? " " + kind : "");
-  }
-  function showDetail(lines) {
-    detailEl.textContent = "";
-    lines.forEach(function (t) {
-      var p = document.createElement("p");
-      p.textContent = t; // ใช้ textContent เสมอ ป้องกันชื่อผู้ใช้ที่แฝงโค้ด
-      detailEl.appendChild(p);
-    });
-    detailEl.hidden = false;
-  }
-  function fail(text, technical) {
-    setStatus(text, "error");
-    if (technical) showDetail(["รายละเอียดสำหรับผู้ดูแลระบบ: " + technical]);
-    retryEl.hidden = false;
-  }
-
-  // ขอตั๋วเข้าสู่ระบบจากฟังก์ชัน liff-auth แล้วแลกเป็นเซสชัน
-  async function loginWithLine(idToken) {
-    var res;
-    try {
-      res = await fetch(cfg.SUPABASE_URL + "/functions/v1/liff-auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: cfg.SUPABASE_PUBLISHABLE_KEY },
-        body: JSON.stringify({ idToken: idToken })
-      });
-    } catch (e) {
-      throw { friendly: "เชื่อมต่อไม่ได้ กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่", tech: "network" };
+export async function boot({ api, root }) {
+  mount(root, h("h1", null, "Sivarom Market"), h("p", { class: "status" }, "กำลังเข้าสู่ระบบ..."));
+  try {
+    const result = await api.ensureLogin();
+    if (result.status === "redirect") return; // กำลังพาไปล็อกอิน LINE
+    const showHome = (profile) => renderHome({ api, root, profile });
+    const profile = result.profile;
+    if (!profile.consented_at || !profile.house_no) {
+      renderConsent({ api, root, profile, onDone: showHome });
+    } else {
+      showHome(profile);
     }
-    var body = {};
-    try { body = await res.json(); } catch (e) { /* ปล่อยว่าง */ }
-    if (res.status === 403 && body.error === "suspended") {
-      throw { friendly: "บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ", tech: "suspended" };
-    }
-    if (!res.ok || !body.token_hash) {
-      throw { friendly: "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่", tech: "liff-auth " + res.status + " " + (body.error || "") };
-    }
-    var out = await sb.auth.verifyOtp({ token_hash: body.token_hash, type: body.verification_type || "magiclink" });
-    if (out.error || !out.data || !out.data.session) {
-      throw { friendly: "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่", tech: "verifyOtp " + (out.error ? out.error.message : "no session") };
-    }
-    return out.data.session;
+  } catch (e) {
+    renderError(root, e, () => boot({ api, root }));
   }
-
-  function fetchProfile(session) {
-    return sb.from("users")
-      .select("display_name, house_no, is_admin, consented_at")
-      .eq("id", session.user.id).maybeSingle();
-  }
-
-  async function main() {
-    retryEl.hidden = true;
-    detailEl.hidden = true;
-    setStatus("กำลังเข้าสู่ระบบ...");
-    try {
-      await liff.init({ liffId: cfg.LIFF_ID });
-      if (!liff.isLoggedIn()) { liff.login(); return; } // พาไปล็อกอิน LINE แล้วกลับมาหน้านี้
-      var idToken = liff.getIDToken();
-      var decoded = liff.getDecodedIDToken();
-      if (!idToken || !decoded || !decoded.sub) {
-        liff.login(); return;
-      }
-
-      // มีเซสชันเดิมอยู่แล้วหรือไม่ เป็นของบัญชี LINE คนเดียวกับที่เปิดอยู่หรือไม่ และบัญชีนั้นยังมีอยู่จริงหรือไม่
-      var session = (await sb.auth.getSession()).data.session;
-      if (session) {
-        var sameUser = session.user && session.user.user_metadata &&
-                       session.user.user_metadata.line_user_id === decoded.sub;
-        if (!sameUser) {
-          await sb.auth.signOut(); session = null;
-        } else {
-          var chk = await sb.auth.getUser(); // ถามเซิร์ฟเวอร์ ไม่เชื่อแค่ข้อมูลที่เก็บไว้ในเครื่อง
-          if (chk.error || !chk.data || !chk.data.user) { await sb.auth.signOut(); session = null; }
-        }
-      }
-      var fresh = false;
-      if (!session) { session = await loginWithLine(idToken); fresh = true; }
-
-      // อ่านโปรไฟล์ตัวเอง (ผ่านกฎ RLS) เพื่อยืนยันว่าสิทธิ์ใช้งานได้จริง
-      var prof = await fetchProfile(session);
-      if ((prof.error || !prof.data) && !fresh) {
-        // เซสชันเก่าใช้ไม่ได้ (เช่น ข้อมูลผู้ใช้ถูกลบไปแล้ว) -> ล็อกอินใหม่ให้หนึ่งครั้ง
-        await sb.auth.signOut();
-        session = await loginWithLine(idToken);
-        fresh = true;
-        prof = await fetchProfile(session);
-      }
-      if (prof.error || !prof.data) {
-        throw { friendly: "อ่านข้อมูลผู้ใช้ไม่สำเร็จ", tech: "profile " + (prof.error ? prof.error.message : "not found") };
-      }
-      var comm = await sb.rpc("current_community");
-
-      var name = prof.data.display_name || "ลูกค้า";
-      setStatus("สวัสดี " + name + " ✅", "ok");
-      showDetail([
-        "ล็อกอินผ่าน LINE สำเร็จ",
-        "บทบาท: " + (prof.data.is_admin ? "ผู้ดูแลระบบ (Admin)" : "ผู้ใช้ทั่วไป"),
-        "บ้านเลขที่: " + (prof.data.house_no || "ยังไม่ได้กรอก"),
-        "ยินยอมเงื่อนไขข้อมูล: " + (prof.data.consented_at ? "แล้ว" : "ยัง"),
-        "ระบบสิทธิ์ทำงาน: " + (comm.data ? "ใช่" : "ไม่")
-      ]);
-    } catch (e) {
-      if (e && e.friendly) { fail(e.friendly, e.tech); }
-      else { fail("เกิดข้อผิดพลาด กรุณาลองใหม่", String(e && e.message ? e.message : e)); }
-    }
-  }
-
-  retryEl.addEventListener("click", main);
-  main();
-})();
+}
