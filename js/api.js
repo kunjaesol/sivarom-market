@@ -120,5 +120,54 @@ export function createApi({ cfg, sb, liff, fetchFn }) {
     return rows.filter(Boolean);
   }
 
-  return { ensureLogin, saveConsent, listOpenShops };
+  // ---------- หน้าร้าน / สั่งอาหาร ----------
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // คืน null ถ้าไม่พบ/ไม่มีสิทธิ์เห็น (เช่น ร้านปิดรับแล้วหรือถูกระงับ)
+  async function getShopPage(postId) {
+    if (!UUID_RE.test(String(postId || ""))) return null;
+    const post = await sb.from("menu_posts").select("id, shop_id, closes_at, is_open").eq("id", postId).maybeSingle();
+    if (post.error) throw { friendly: "โหลดเมนูไม่สำเร็จ", tech: "menu_posts " + post.error.message };
+    if (!post.data) return null;
+    const shop = await sb.from("shops").select("id, name, fulfillment, phone").eq("id", post.data.shop_id).maybeSingle();
+    if (shop.error) throw { friendly: "โหลดเมนูไม่สำเร็จ", tech: "shops " + shop.error.message };
+    if (!shop.data) return null;
+    const items = await sb.rpc("list_menu_items", { p_post: postId });
+    if (items.error) throw { friendly: "โหลดเมนูไม่สำเร็จ", tech: "list_menu_items " + items.error.message };
+    return {
+      postId: post.data.id, shopId: shop.data.id, shopName: shop.data.name,
+      fulfillment: shop.data.fulfillment, phone: shop.data.phone, closesAt: post.data.closes_at,
+      isOpen: !!post.data.is_open && new Date(post.data.closes_at) > new Date(),
+      items: items.data || []
+    };
+  }
+
+  // ข้อมูลบัญชีรับเงินของร้าน (แสดงหลังสั่งแล้วเท่านั้น)
+  async function getPaymentInfo(shopId) {
+    const res = await sb.from("shops").select("bank_name, account_name, account_no").eq("id", shopId).maybeSingle();
+    if (res.error || !res.data) return null;
+    return res.data;
+  }
+
+  // lines = [{ item_id, qty, note }]  ราคาและยอดรวมคิดใหม่ที่ฐานข้อมูลเสมอ ไม่เชื่อค่าจากหน้าเว็บ
+  async function placeOrder({ postId, lines, fulfillment, address, deliverAt }) {
+    const res = await sb.rpc("place_order", {
+      p_menu_post: postId,
+      p_items: lines,
+      p_fulfillment: fulfillment,
+      p_address: address || null,
+      p_deliver_at: deliverAt || null
+    });
+    if (res.error) {
+      // P0001 = ข้อความที่เราเขียนเองในฐานข้อมูล (ภาษาไทย อ่านรู้เรื่อง) แสดงให้ลูกค้าได้เลย
+      if (res.error.code === "P0001") throw { friendly: res.error.message, tech: "place_order P0001" };
+      throw {
+        friendly: "สั่งอาหารไม่สำเร็จ กรุณาลองใหม่ (ถ้าไม่แน่ใจว่าออเดอร์ถูกส่งแล้วหรือยัง กรุณาติดต่อร้านก่อนสั่งซ้ำ)",
+        tech: "place_order " + (res.error.code || "") + " " + (res.error.message || "")
+      };
+    }
+    return res.data;
+  }
+
+  return { ensureLogin, saveConsent, listOpenShops, getShopPage, getPaymentInfo, placeOrder };
 }
