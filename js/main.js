@@ -7,4 +7,4 @@ const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHAB
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
 });
 const api = createApi({ cfg, sb, liff: window.liff, fetchFn: window.fetch.bind(window) });
-boot({ api, root: document.getElementById("app") });
+boot({ api, root: document.getElementById("app"), search: window.location.search });
