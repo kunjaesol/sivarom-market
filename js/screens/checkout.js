@@ -10,6 +10,16 @@ export function bangkokIso(hhmm, now = new Date()) {
   return isNaN(d) ? null : d.toISOString();
 }
 
+// เวลาเริ่มต้นของช่องเลือกเวลา: อีก ~15 นาทีข้างหน้า ปัดขึ้นเป็นช่วง 15 นาที (เวลาไทย)
+export function defaultSlot(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hour12: false })
+    .formatToParts(new Date(now.getTime() + 15 * 60 * 1000));
+  let hh = Number(parts.find((p) => p.type === "hour").value) % 24;
+  let mm = Math.ceil(Number(parts.find((p) => p.type === "minute").value) / 15) * 15;
+  if (mm === 60) { mm = 0; hh = (hh + 1) % 24; }
+  return { hh, mm };
+}
+
 export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
   const page = cart.page;
   const picked = page.items.filter((i) => cart.lines[i.id] > 0);
@@ -38,8 +48,15 @@ export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
 
   // ---------- เวลาส่ง ----------
   let timed = false;
-  const timeInput = h("input", { class: "input", type: "time", id: "time" });
-  const timeBox = h("div", { hidden: true }, timeInput);
+  const pad = (n) => String(n).padStart(2, "0");
+  const hourSel = h("select", { class: "input", id: "time-h", "aria-label": "ชั่วโมง" },
+    Array.from({ length: 24 }, (_, i) => h("option", { value: pad(i) }, pad(i))));
+  const minSel = h("select", { class: "input", id: "time-m", "aria-label": "นาที" },
+    [0, 15, 30, 45].map((m) => h("option", { value: pad(m) }, pad(m))));
+  const slot = defaultSlot();
+  hourSel.value = pad(slot.hh); minSel.value = pad(slot.mm);
+  const timeBox = h("div", { class: "time-row", hidden: true },
+    hourSel, h("span", { class: "time-sep" }, ":"), minSel, h("span", { class: "time-unit" }, "น."));
   const timeSeg = h("div", { class: "seg" });
   function drawTime() {
     const btn = (value, label) => h("button", {
@@ -63,15 +80,16 @@ export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
   });
 
   const errorBox = h("p", { class: "field-error", role: "alert", hidden: true });
+  const fixBtn = h("button", { class: "btn btn-secondary", type: "button", hidden: true, onclick: onBack }, "กลับไปแก้จำนวน");
   const confirmBtn = h("button", { class: "btn", type: "button" }, "ยืนยันสั่ง · " + baht(total));
   function showError(t) { errorBox.textContent = t; errorBox.hidden = false; }
 
   confirmBtn.addEventListener("click", async () => {
-    errorBox.hidden = true;
+    errorBox.hidden = true; fixBtn.hidden = true;
     for (const i of picked) cart.notes[i.id] = noteInputs.get(i.id).value;
     let deliverAt = null;
     if (timed) {
-      deliverAt = bangkokIso(timeInput.value);
+      deliverAt = bangkokIso(hourSel.value + ":" + minSel.value);
       if (!deliverAt) { showError("กรุณาเลือกเวลาที่ต้องการให้ส่ง หรือเลือก \"เมื่อพร้อม\""); return; }
       if (new Date(deliverAt).getTime() < Date.now() - 5 * 60 * 1000) { showError("เวลานี้ผ่านไปแล้ว กรุณาเลือกเวลาใหม่"); return; }
     }
@@ -90,6 +108,7 @@ export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
       onDone({ result, payment });
     } catch (e) {
       showError(e && e.friendly ? e.friendly : "สั่งอาหารไม่สำเร็จ กรุณาลองใหม่");
+      if (e && e.tech === "place_order P0001") fixBtn.hidden = false; // เช่น ของเหลือไม่พอ: พากลับไปแก้จำนวนล่าสุด
       confirmBtn.disabled = false;
       confirmBtn.textContent = "ยืนยันสั่ง · " + baht(total);
     }
@@ -106,17 +125,20 @@ export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
     h("h2", null, "เวลาส่ง (ไม่บังคับ)"),
     timeSeg, timeBox,
     errorBox,
-    confirmBtn);
+    confirmBtn,
+    fixBtn);
 }
 
 export function renderDone({ root, shopName, outcome, onHome }) {
   const { result, payment } = outcome;
   const copyMsg = h("p", { class: "muted", hidden: true });
   const parts = [
-    h("h1", null, "ส่งออเดอร์ให้ร้านแล้ว ✅"),
+    h("h1", null, "สั่งอาหารเรียบร้อย"),
+    h("p", null, h("span", { class: "badge badge-warn" }, "สถานะ: รอชำระเงิน")),
     h("p", { class: "status ok" }, "เลขออเดอร์ #" + result.order_no),
-    h("p", null, shopName),
-    h("div", { class: "total-row" }, h("span", null, "ยอดที่ต้องโอน"), h("strong", null, baht(result.total)))
+    h("p", null, shopName + " ได้รับออเดอร์ของคุณแล้ว"),
+    h("div", { class: "total-row" }, h("span", null, "ยอดที่ต้องชำระ"), h("strong", null, baht(result.total))),
+    h("h2", null, "ขั้นต่อไป: ชำระเงิน")
   ];
   if (payment && payment.account_no) {
     const copyBtn = h("button", { class: "btn btn-secondary", type: "button" }, "คัดลอกเลขบัญชี");
@@ -136,6 +158,7 @@ export function renderDone({ root, shopName, outcome, onHome }) {
     parts.push(h("p", { class: "muted" }, "ร้านยังไม่ได้ตั้งบัญชีรับเงิน กรุณาติดต่อร้านเพื่อชำระเงิน"));
   }
   parts.push(
+    h("p", { class: "muted" }, "หรือจะจ่ายเงินสดตอนรับอาหารก็ได้ แจ้งร้านด้วยนะ"),
     h("p", { class: "muted" }, "การแนบสลิปและดูสถานะออเดอร์จะเพิ่มในขั้นถัดไป ตอนนี้เก็บเลขออเดอร์นี้ไว้ แล้วแจ้งร้านเมื่อโอนแล้ว"),
     h("button", { class: "btn", type: "button", onclick: onHome }, "กลับหน้าแรก"));
   mount(root, parts);
