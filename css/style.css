@@ -53,3 +53,10 @@ main { padding-bottom: 110px; }
 .seg-btn { flex: 1; min-height: 52px; font-size: 1.05rem; font-weight: 600; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--fg); }
 .seg-btn.on { border-color: var(--accent); background: #e9f7ef; color: #04753a; }
 .acct { font-size: 1.5rem; font-weight: 700; letter-spacing: .5px; color: var(--fg) !important; word-break: break-all; }
+/* ---- ขั้น 4b-2: ป้ายสถานะ / เลือกเวลา 24 ชั่วโมง ---- */
+.badge { display:inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 700; font-size: .95rem; }
+.badge-warn { background:#fff0d6; color:#8a4b00; }
+.time-row { display:flex; align-items:center; gap: 10px; }
+.time-row select { flex: 1; }
+.time-sep, .time-unit { font-weight: 700; font-size: 1.2rem; }
+select.input { background:#fff; }
