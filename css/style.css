@@ -32,3 +32,24 @@ p { margin: 8px 0; }
 .tag-out { background:#fde8e6; color: var(--err); }
 /* ให้แอตทริบิวต์ hidden ซ่อนองค์ประกอบได้จริง (ไม่ถูก display ของคลาสอื่นทับ) */
 [hidden] { display: none !important; }
+/* ---- ขั้น 4b: หน้าร้าน / ตะกร้า / ตรวจสอบก่อนสั่ง ---- */
+main { padding-bottom: 110px; }
+.back-link { background: none; border: 0; padding: 8px 0; min-height: 44px; font-size: 1rem; color: var(--accent); font-weight: 600; }
+.item-head { display:flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.item-head h3 { margin: 0; }
+.item-foot { display:flex; justify-content: space-between; align-items:center; margin-top: 10px; }
+.price { font-weight: 600; white-space: nowrap; }
+.stepper { display:flex; align-items:center; gap: 14px; }
+.qty { min-width: 32px; text-align:center; font-size: 1.3rem; font-weight: 700; }
+.qty-btn { width: 52px; height: 52px; font-size: 1.6rem; font-weight: 700; border-radius: 50%; border: 2px solid var(--accent); background: #fff; color: var(--accent); line-height: 1; }
+.qty-btn:disabled { opacity: .35; }
+.qty-btn:active:not(:disabled) { background: var(--accent); color: #fff; }
+.sticky-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px)); background: rgba(255,255,255,.96); border-top: 1px solid var(--line); }
+.sticky-bar .btn { margin: 0 auto; max-width: 520px; }
+.btn-link { text-align: center; text-decoration: none; display:flex; align-items:center; justify-content:center; }
+.notice { background: #fff4e5; border-radius: 12px; padding: 10px 14px; }
+.total-row { display:flex; justify-content: space-between; align-items: baseline; font-size: 1.25rem; padding: 12px 4px; border-top: 2px solid var(--line); margin-top: 8px; }
+.seg { display:flex; gap: 10px; margin: 6px 0; }
+.seg-btn { flex: 1; min-height: 52px; font-size: 1.05rem; font-weight: 600; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--fg); }
+.seg-btn.on { border-color: var(--accent); background: #e9f7ef; color: #04753a; }
+.acct { font-size: 1.5rem; font-weight: 700; letter-spacing: .5px; color: var(--fg) !important; word-break: break-all; }
