@@ -60,7 +60,7 @@ export async function renderShop({ api, root, postId, cart, onBack, onCheckout }
   const orderBtn = h("button", { class: "btn", type: "button" }, "");
 
   function drawHead() {
-    head.replaceChildren(
+    mount(head,
       h("h1", null, page.shopName),
       h("p", { class: "muted" }, (page.isOpen ? "รับออเดอร์ถึง " + formatTime(page.closesAt) : "ปิดรับออเดอร์แล้ว") + " · " + (FULFILLMENT_LABEL[page.fulfillment] || "")),
       !page.isOpen ? h("p", { class: "notice" }, "ร้านนี้ปิดรับออเดอร์แล้ว ดูเมนูได้แต่สั่งไม่ได้") : null);
