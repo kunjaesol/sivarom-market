@@ -31,7 +31,7 @@ export async function boot({ api, root, search = "" }) {
       done: (outcome) => {
         const shopName = cart.page ? cart.page.shopName : "";
         cart.postId = null; cart.lines = {}; cart.notes = {}; cart.page = null;
-        renderDone({ root, shopName, outcome, onHome: go.home });
+        renderDone({ api, root, shopName, outcome, onHome: go.home });
       }
     };
     const postParam = new URLSearchParams(search).get("post");
