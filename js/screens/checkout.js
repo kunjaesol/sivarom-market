@@ -1,5 +1,6 @@
 // หน้าตรวจสอบก่อนสั่ง + หน้าสั่งสำเร็จ (แสดงยอดโอนและบัญชีของร้าน)
 import { h, mount, baht } from "../ui.js";
+import { createSlipUploader } from "./slip.js";
 
 // "ส่งเมื่อพร้อม" = ไม่ระบุเวลา, หรือระบุเวลา HH:MM ของวันนี้ (เวลาไทย)
 export function bangkokIso(hhmm, now = new Date()) {
@@ -129,12 +130,14 @@ export function renderCheckout({ api, root, cart, profile, onBack, onDone }) {
     fixBtn);
 }
 
-export function renderDone({ root, shopName, outcome, onHome }) {
+export function renderDone({ root, api, shopName, outcome, onHome }) {
   const { result, payment } = outcome;
   const copyMsg = h("p", { class: "muted", hidden: true });
+  const badge = h("span", { class: "badge badge-warn" }, "สถานะ: รอชำระเงิน");
+  const slipArea = h("div", null);
   const parts = [
     h("h1", null, "สั่งอาหารเรียบร้อย"),
-    h("p", null, h("span", { class: "badge badge-warn" }, "สถานะ: รอชำระเงิน")),
+    h("p", null, badge),
     h("p", { class: "status ok" }, "เลขออเดอร์ #" + result.order_no),
     h("p", null, shopName + " ได้รับออเดอร์ของคุณแล้ว"),
     h("div", { class: "total-row" }, h("span", null, "ยอดที่ต้องชำระ"), h("strong", null, baht(result.total))),
@@ -157,9 +160,24 @@ export function renderDone({ root, shopName, outcome, onHome }) {
   } else {
     parts.push(h("p", { class: "muted" }, "ร้านยังไม่ได้ตั้งบัญชีรับเงิน กรุณาติดต่อร้านเพื่อชำระเงิน"));
   }
+
+  // โอนแล้วแนบสลิปได้เลย (ถ้ายังไม่โอน ข้ามไปก่อนได้ ภายหลังแนบจากหน้า "ออเดอร์ของฉัน" ในขั้นถัดไป)
+  if (result.order_id) {
+    parts.push(h("h2", null, "โอนแล้ว? แนบสลิปได้เลย"), slipArea);
+    slipArea.append(createSlipUploader({
+      api, orderId: result.order_id,
+      onSent: () => {
+        badge.className = "badge badge-ok";
+        badge.textContent = "สถานะ: แจ้งชำระเงินแล้ว รอร้านตรวจสอบ";
+        slipArea.replaceChildren(
+          h("p", { class: "status ok" }, "ส่งสลิปให้ร้านแล้ว"),
+          h("p", { class: "muted" }, "ร้านจะตรวจสอบและยืนยันการชำระเงิน"));
+      }
+    }));
+  }
   parts.push(
-    h("p", { class: "muted" }, "หรือจะจ่ายเงินสดตอนรับอาหารก็ได้ แจ้งร้านด้วยนะ"),
-    h("p", { class: "muted" }, "การแนบสลิปและดูสถานะออเดอร์จะเพิ่มในขั้นถัดไป ตอนนี้เก็บเลขออเดอร์นี้ไว้ แล้วแจ้งร้านเมื่อโอนแล้ว"),
-    h("button", { class: "btn", type: "button", onclick: onHome }, "กลับหน้าแรก"));
+    h("p", { class: "muted" }, "ยังไม่โอน? กลับหน้าแรกก่อนได้ หรือจะจ่ายเงินสดตอนรับอาหารก็ได้ แจ้งร้านด้วยนะ"),
+    h("p", { class: "muted" }, "ดูสถานะออเดอร์ย้อนหลังจะเพิ่มในขั้นถัดไป ตอนนี้เก็บเลขออเดอร์นี้ไว้"),
+    h("button", { class: "btn btn-secondary", type: "button", onclick: onHome }, "กลับหน้าแรก"));
   mount(root, parts);
 }
