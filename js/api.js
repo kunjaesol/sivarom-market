@@ -169,5 +169,29 @@ export function createApi({ cfg, sb, liff, fetchFn }) {
     return res.data;
   }
 
-  return { ensureLogin, saveConsent, listOpenShops, getShopPage, getPaymentInfo, placeOrder };
+    // ---------- สลิปโอนเงิน ----------
+  function slipFileName() {
+    const rnd = (globalThis.crypto && globalThis.crypto.randomUUID)
+      ? globalThis.crypto.randomUUID().slice(0, 8) : Math.random().toString(16).slice(2, 10);
+    return Date.now() + "-" + rnd + ".jpg";
+  }
+
+  // อัปโหลดรูป (ที่ย่อแล้ว) ไปที่เก็บไฟล์ส่วนตัว ชื่อไฟล์ต้องเป็น <order_id>/<ชื่อ>.jpg ตามกฎของฐานข้อมูล
+  async function uploadSlip(orderId, blob) {
+    const path = orderId + "/" + slipFileName();
+    const res = await sb.storage.from("slips").upload(path, blob, { contentType: "image/jpeg", upsert: false, cacheControl: "3600" });
+    if (res.error) throw { friendly: "ส่งรูปสลิปไม่สำเร็จ กรุณาลองใหม่", tech: "upload " + (res.error.message || "") };
+    return path;
+  }
+
+  // แจ้งว่าชำระเงินแล้ว (ฐานข้อมูลตรวจว่าเป็นออเดอร์ของเราและชื่อไฟล์ถูกต้อง)
+  async function reportPayment(orderId, path) {
+    const res = await sb.rpc("report_payment", { p_order: orderId, p_slip_path: path });
+    if (res.error) {
+      if (res.error.code === "P0001") throw { friendly: res.error.message, tech: "report_payment P0001" };
+      throw { friendly: "แจ้งชำระเงินไม่สำเร็จ กรุณาลองใหม่", tech: "report_payment " + (res.error.code || "") + " " + (res.error.message || "") };
+    }
+  }
+
+  return { ensureLogin, saveConsent, listOpenShops, getShopPage, getPaymentInfo, placeOrder, uploadSlip, reportPayment };
 }
