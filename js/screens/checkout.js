@@ -165,7 +165,7 @@ export function renderDone({ root, api, shopName, outcome, onHome }) {
   if (result.order_id) {
     parts.push(h("h2", null, "โอนแล้ว? แนบสลิปได้เลย"), slipArea);
     slipArea.append(createSlipUploader({
-      api, orderId: result.order_id,
+            api, orderId: result.order_id, amount: result.total,
       onSent: () => {
         badge.className = "badge badge-ok";
         badge.textContent = "สถานะ: แจ้งชำระเงินแล้ว รอร้านตรวจสอบ";
